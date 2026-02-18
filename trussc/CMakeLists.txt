@@ -114,6 +114,7 @@ elseif(TC_PLATFORM_MACOS)
         "-framework Metal"
         "-framework MetalKit"
         "-framework Cocoa"
+        "-framework ImageIO"
         "-framework QuartzCore"
         "-framework AudioToolbox"
         "-framework AVFoundation"
