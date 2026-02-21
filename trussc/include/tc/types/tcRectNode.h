@@ -141,9 +141,9 @@ protected:
     void beginDraw() override {
         if (clipping_) {
             // Convert local coordinates (0,0) and (width_, height_) to global
-            float gx1, gy1, gx2, gy2;
-            localToGlobal(0, 0, gx1, gy1);
-            localToGlobal(width_, height_, gx2, gy2);
+            Vec3 g1 = localToGlobal(Vec3(0, 0, 0));
+            Vec3 g2 = localToGlobal(Vec3(width_, height_, 0));
+            float gx1 = g1.x, gy1 = g1.y, gx2 = g2.x, gy2 = g2.y;
 
             // Calculate rectangle in screen coordinates (considering DPI scale)
             float dpi = sapp_dpi_scale();
