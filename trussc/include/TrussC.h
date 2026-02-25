@@ -1396,6 +1396,13 @@ inline void bindCursorImage(Cursor cursor, int width, int height,
     sapp_bind_mouse_cursor_image((sapp_mouse_cursor)cursor, &desc);
 }
 
+// Image overload of bindCursorImage is defined after tcImage.h include (see below)
+
+// Unbind a custom cursor image, restoring the default system cursor for that slot
+inline void unbindCursorImage(Cursor cursor) {
+    sapp_unbind_mouse_cursor_image((sapp_mouse_cursor)cursor);
+}
+
 // ---------------------------------------------------------------------------
 // Clipboard
 // ---------------------------------------------------------------------------
@@ -2333,6 +2340,15 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 
 // TrussC image (needed before tcMesh.h)
 #include "tc/graphics/tcImage.h"
+
+// Bind an Image to a cursor slot (convenience overload, after tcImage.h)
+namespace trussc {
+inline void bindCursorImage(Cursor cursor, const Image& image,
+                            int hotspotX = 0, int hotspotY = 0) {
+    bindCursorImage(cursor, image.getWidth(), image.getHeight(),
+                    image.getPixelsData(), hotspotX, hotspotY);
+}
+} // namespace trussc
 
 // TrussC mesh
 #include "tc/graphics/tcMesh.h"

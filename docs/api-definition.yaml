@@ -1089,6 +1089,72 @@ categories:
         sketch: true
         snippet: "isKeyPressed(${1:key})"
 
+      # --- Cursor ---
+
+      - name: showCursor
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Show the mouse cursor (default)"
+        description_ja: "マウスカーソルを表示（デフォルト）"
+        of_equivalent: "ofShowCursor"
+        sketch: true
+        snippet: "showCursor()"
+
+      - name: hideCursor
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Hide the mouse cursor"
+        description_ja: "マウスカーソルを隠す"
+        of_equivalent: "ofHideCursor"
+        sketch: true
+        snippet: "hideCursor()"
+
+      - name: setCursor
+        return: "void"
+        signatures:
+          - params: "Cursor cursor"
+            params_simple: "cursor"
+        description: "Set the mouse cursor shape"
+        description_ja: "マウスカーソルの形状を設定"
+        sketch: true
+        snippet: "setCursor(${1:Cursor::Hand})"
+
+      - name: getCursor
+        return: "Cursor"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get the current mouse cursor shape"
+        description_ja: "現在のマウスカーソル形状を取得"
+        sketch: true
+        snippet: "getCursor()"
+
+      - name: bindCursorImage
+        return: "void"
+        signatures:
+          - params: "Cursor cursor, int width, int height, const unsigned char* pixels, int hotspotX = 0, int hotspotY = 0"
+            params_simple: "cursor, width, height, pixels, hotspotX, hotspotY"
+          - params: "Cursor cursor, const Image& image, int hotspotX = 0, int hotspotY = 0"
+            params_simple: "cursor, image, hotspotX, hotspotY"
+        description: "Bind a custom image to a cursor slot (RGBA pixels or Image)"
+        description_ja: "カスタム画像をカーソルスロットにバインド（RGBAピクセルまたはImage）"
+        sketch: true
+        snippet: "bindCursorImage(${1:Cursor::Custom0}, ${2:image})"
+
+      - name: unbindCursorImage
+        return: "void"
+        signatures:
+          - params: "Cursor cursor"
+            params_simple: "cursor"
+        description: "Unbind a custom cursor image, restoring the system default"
+        description_ja: "カスタムカーソル画像を解除し、システムデフォルトに戻す"
+        sketch: true
+        snippet: "unbindCursorImage(${1:Cursor::Custom0})"
+
   # ==========================================================================
   # Time - Frame
   # ==========================================================================
@@ -4729,6 +4795,97 @@ constants:
     value: "6"
     description: "Silent (no sound)"
     description_ja: "無音"
+    sketch: true
+
+  # Cursor constants
+  - name: "Cursor::Default"
+    value: "0"
+    description: "System default cursor"
+    description_ja: "システムデフォルトカーソル"
+    sketch: true
+
+  - name: "Cursor::Arrow"
+    value: "1"
+    description: "Arrow cursor"
+    description_ja: "矢印カーソル"
+    sketch: true
+
+  - name: "Cursor::IBeam"
+    value: "2"
+    description: "Text input cursor"
+    description_ja: "テキスト入力カーソル"
+    sketch: true
+
+  - name: "Cursor::Crosshair"
+    value: "3"
+    description: "Crosshair cursor"
+    description_ja: "十字カーソル"
+    sketch: true
+
+  - name: "Cursor::Hand"
+    value: "4"
+    description: "Pointing hand cursor"
+    description_ja: "指差しカーソル"
+    sketch: true
+
+  - name: "Cursor::ResizeEW"
+    value: "5"
+    description: "East-west resize cursor"
+    description_ja: "左右リサイズカーソル"
+    sketch: true
+
+  - name: "Cursor::ResizeNS"
+    value: "6"
+    description: "North-south resize cursor"
+    description_ja: "上下リサイズカーソル"
+    sketch: true
+
+  - name: "Cursor::ResizeNWSE"
+    value: "7"
+    description: "NW-SE diagonal resize cursor"
+    description_ja: "左上-右下リサイズカーソル"
+    sketch: true
+
+  - name: "Cursor::ResizeNESW"
+    value: "8"
+    description: "NE-SW diagonal resize cursor"
+    description_ja: "右上-左下リサイズカーソル"
+    sketch: true
+
+  - name: "Cursor::ResizeAll"
+    value: "9"
+    description: "Move/resize all directions cursor"
+    description_ja: "全方向移動カーソル"
+    sketch: true
+
+  - name: "Cursor::NotAllowed"
+    value: "10"
+    description: "Not allowed cursor"
+    description_ja: "禁止カーソル"
+    sketch: true
+
+  - name: "Cursor::Custom0"
+    value: "11"
+    description: "Custom cursor slot 0 (bind image first)"
+    description_ja: "カスタムカーソルスロット0（先に画像をバインド）"
+    sketch: true
+
+  - name: "Cursor::Custom1"
+    value: "12"
+    description: "Custom cursor slot 1"
+    description_ja: "カスタムカーソルスロット1"
+    sketch: true
+
+  - name: "Cursor::Custom2"
+    value: "13"
+    description: "Custom cursor slot 2"
+    description_ja: "カスタムカーソルスロット2"
+    sketch: true
+
+  - name: "Cursor::Custom3"
+    value: "14"
+    description: "Custom cursor slot 3"
+    description_ja: "カスタムカーソルスロット3"
     sketch: true
 
 # ==========================================================================
