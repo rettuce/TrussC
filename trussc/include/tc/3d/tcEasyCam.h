@@ -2,6 +2,7 @@
 
 // tc::EasyCam - oF-compatible 3D camera
 // Interactive camera with mouse-controlled rotation, zoom, and pan
+// Supports configurable up axis (Y-up default, Z-up for scientific/VQF coords)
 
 #include <cmath>
 #include "tc/events/tcCoreEvents.h"
@@ -12,6 +13,7 @@ class EasyCam {
 public:
     EasyCam()
         : target_{0.0f, 0.0f, 0.0f}
+        , upAxis_{0.0f, 1.0f, 0.0f}
         , distance_(400.0f)
         , rotationX_(0.0f)
         , rotationY_(0.0f)
@@ -45,20 +47,11 @@ public:
         float aspect = w / h;
 
         // Calculate camera position from spherical coordinates
-        float cosX = cos(rotationX_);
-        float sinX = sin(rotationX_);
-        float cosY = cos(rotationY_);
-        float sinY = sin(rotationY_);
-        Vec3 eye = {
-            target_.x + distance_ * sinY * cosX,
-            target_.y + distance_ * sinX,
-            target_.z + distance_ * cosY * cosX
-        };
-        Vec3 up = {0.0f, 1.0f, 0.0f};
+        Vec3 eye = calcEyePosition();
 
         // Create matrices using Mat4 (row-major)
         Mat4 projection = Mat4::perspective(fov_, aspect, nearClip_, farClip_);
-        Mat4 view = Mat4::lookAt(eye, target_, up);
+        Mat4 view = Mat4::lookAt(eye, target_, upAxis_);
 
         // Save for worldToScreen/screenToWorld
         internal::currentProjectionMatrix = projection;
@@ -109,6 +102,20 @@ public:
 
     Vec3 getTarget() const {
         return target_;
+    }
+
+    // Set up axis for the camera coordinate system.
+    // Default is Y-up (0,1,0). Use (0,0,1) for Z-up (scientific/VQF convention).
+    void setUpAxis(const Vec3& up) {
+        upAxis_ = up;
+    }
+
+    void setUpAxis(float x, float y, float z) {
+        upAxis_ = {x, y, z};
+    }
+
+    Vec3 getUpAxis() const {
+        return upAxis_;
     }
 
     // Set distance between camera and target
@@ -222,6 +229,38 @@ public:
     void mouseScrolled(float dx, float dy) { onMouseScrolled(dx, dy); }
 
 private:
+    // Compute right and forward axes from upAxis
+    void getOrbitAxes(Vec3& right, Vec3& forward) const {
+        // Choose a reference axis that isn't parallel to upAxis
+        if (std::fabs(upAxis_.z) > 0.9f) {
+            // Z-up: right=X, forward=-Y
+            right   = {1.0f, 0.0f, 0.0f};
+            forward = {0.0f, -1.0f, 0.0f};
+        } else {
+            // Y-up (default): right=X, forward=Z
+            right   = {1.0f, 0.0f, 0.0f};
+            forward = {0.0f, 0.0f, 1.0f};
+        }
+    }
+
+    // Calculate eye position from spherical coordinates + upAxis
+    Vec3 calcEyePosition() const {
+        Vec3 right, forward;
+        getOrbitAxes(right, forward);
+
+        float cosEl = cos(rotationX_);
+        float sinEl = sin(rotationX_);
+        float cosAz = cos(rotationY_);
+        float sinAz = sin(rotationY_);
+
+        // Orbit: horizontal circle in right/forward plane, vertical along upAxis
+        return {
+            target_.x + distance_ * (right.x * sinAz * cosEl + forward.x * cosAz * cosEl + upAxis_.x * sinEl),
+            target_.y + distance_ * (right.y * sinAz * cosEl + forward.y * cosAz * cosEl + upAxis_.y * sinEl),
+            target_.z + distance_ * (right.z * sinAz * cosEl + forward.z * cosAz * cosEl + upAxis_.z * sinEl)
+        };
+    }
+
     bool isInsideControlArea(float x, float y) const {
         if (!hasControlArea_) return true;
         return x >= controlArea_.x && x <= controlArea_.x + controlArea_.width
@@ -260,26 +299,30 @@ private:
             rotationY_ -= dx * 0.01f * sensitivity_;
             rotationX_ += dy * 0.01f * sensitivity_;  // Intuitive up/down
 
-            // Limit X-axis rotation (restrict to ~80 degrees to prevent flipping near poles)
-            float maxAngle = 1.4f;  // ~80 degrees
+            // Limit elevation to ~80 degrees to prevent flipping near poles
+            float maxAngle = 1.4f;
             if (rotationX_ > maxAngle) rotationX_ = maxAngle;
             if (rotationX_ < -maxAngle) rotationX_ = -maxAngle;
         } else if (isPanning_ && button == MOUSE_BUTTON_MIDDLE) {
-            // Pan (movement in XY plane)
-            float cosY = cos(rotationY_);
-            float sinY = sin(rotationY_);
+            Vec3 right, forward;
+            getOrbitAxes(right, forward);
 
-            // Calculate camera's right and up directions
-            float rightX = cosY;
-            float rightZ = -sinY;
+            // Camera's horizontal right direction (rotated by azimuth)
+            float cosAz = cos(rotationY_);
+            float sinAz = sin(rotationY_);
+            Vec3 camRight = {
+                right.x * cosAz + forward.x * sinAz,
+                right.y * cosAz + forward.y * sinAz,
+                right.z * cosAz + forward.z * sinAz
+            };
 
-            // Scale pan amount
             float panX = dx * 0.5f * panSensitivity_;
             float panY = -dy * 0.5f * panSensitivity_;
 
-            target_.x -= rightX * panX;
-            target_.z -= rightZ * panX;
-            target_.y += panY;
+            // Pan: horizontal along camRight, vertical along upAxis
+            target_.x -= camRight.x * panX - upAxis_.x * panY;
+            target_.y -= camRight.y * panX - upAxis_.y * panY;
+            target_.z -= camRight.z * panX - upAxis_.z * panY;
         }
 
         lastMouseX_ = x;
@@ -306,23 +349,15 @@ public:
 
     // Get camera position
     Vec3 getPosition() const {
-        float cosX = cos(rotationX_);
-        float sinX = sin(rotationX_);
-        float cosY = cos(rotationY_);
-        float sinY = sin(rotationY_);
-
-        return {
-            target_.x + distance_ * sinY * cosX,
-            target_.y + distance_ * sinX,
-            target_.z + distance_ * cosY * cosX
-        };
+        return calcEyePosition();
     }
 
 private:
     Vec3 target_;         // Look-at target
+    Vec3 upAxis_;         // Up axis (default Y-up, set to Z-up for scientific coords)
     float distance_;      // Distance from target
-    float rotationX_;     // X-axis rotation (elevation)
-    float rotationY_;     // Y-axis rotation (azimuth)
+    float rotationX_;     // Elevation angle (radians)
+    float rotationY_;     // Azimuth angle (radians)
 
     float fov_;           // Field of view (radians)
     float nearClip_;      // Near clipping plane
