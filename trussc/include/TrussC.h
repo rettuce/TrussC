@@ -1899,7 +1899,8 @@ namespace internal {
 } // namespace internal
 
 namespace mcp {
-    void registerStandardTools();
+    void registerInspectionTools();
+    void registerDebuggerTools();
 }
 
 namespace internal {
@@ -1919,26 +1920,27 @@ namespace internal {
         // To disable, call console::stop() in setup()
         // Note: Console is not available on web platform (no stdin/threads)
         #ifndef __EMSCRIPTEN__
-        
+
+        console::start();
+
         // Check for MCP mode via environment variable
         const char* envMcp = std::getenv("TRUSSC_MCP");
         if (envMcp && std::string(envMcp) == "1") {
-            // Enable MCP mode (redirects logs to stderr, JSON notifications to stdout)
-            tcSetMcpMode(true);
-            logNotice("System") << "MCP Mode Enabled";
+            // Register inspection tools (screenshot etc.)
+            mcp::registerInspectionTools();
+
+            // Get port from environment (0 = OS auto-assign)
+            int mcpPort = 0;
+            const char* envPort = std::getenv("TRUSSC_MCP_PORT");
+            if (envPort) {
+                mcpPort = std::atoi(envPort);
+            }
+
+            // Start HTTP server for MCP transport
+            mcp::startHttpServer(mcpPort);
+
+            logNotice("System") << "MCP HTTP server started";
         }
-
-        console::start();
-        
-        // Register standard MCP tools (mouse, key, screenshot, etc.)
-        mcp::registerStandardTools();
-
-        // Register built-in command handler (hold listener in static)
-        static EventListener consoleListener;
-        consoleListener = events().console.listen([](ConsoleEventArgs& e) {
-            // Pass raw input to MCP processor (always active)
-            mcp::processInput(e.raw);
-        });
         #endif
 
         if (appSetupFunc) appSetupFunc();
@@ -1968,6 +1970,11 @@ namespace internal {
 
         // Process console input (fire events)
         console::processQueue();
+
+        // Process MCP HTTP requests on main thread
+        #ifndef __EMSCRIPTEN__
+        mcp::processHttpQueue();
+        #endif
 
         // --- Update Loop processing ---
         if (updateSyncedToDraw) {
@@ -2046,6 +2053,11 @@ namespace internal {
     }
 
     inline void _cleanup_cb() {
+        // Stop MCP HTTP server
+        #ifndef __EMSCRIPTEN__
+        mcp::stopHttpServer();
+        #endif
+
         // Stop console input thread
         console::stop();
 
