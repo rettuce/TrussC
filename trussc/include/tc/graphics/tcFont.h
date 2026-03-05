@@ -240,6 +240,10 @@ public:
         // Only release GPU resources if sokol is still valid
         // (may have already shut down at program exit)
         if (sg_isvalid()) {
+            for (auto& pd : pendingDestroys_) {
+                sg_destroy_view(pd.view);
+                sg_destroy_image(pd.image);
+            }
             for (auto& atlas : atlases_) {
                 if (atlas.textureValid_) {
                     sg_destroy_view(atlas.view_);
@@ -247,6 +251,7 @@ public:
                 }
             }
         }
+        pendingDestroys_.clear();
         atlases_.clear();
         glyphs_.clear();
         fontData_.clear();
@@ -280,6 +285,9 @@ public:
     // Get texture
     // -------------------------------------------------------------------------
     void ensureTexturesUpdated() {
+        // Destroy GPU resources from previous frame (safe: sgl commands already consumed)
+        flushPendingDestroys();
+
         for (auto& atlas : atlases_) {
             if (atlas.textureDirty_) {
                 updateAtlasTexture(atlas);
@@ -335,6 +343,15 @@ private:
     std::unordered_map<uint32_t, GlyphInfo> glyphs_;
 
     bool loaded_ = false;
+
+    // Deferred GPU resource destruction (views/images may still be referenced
+    // by queued sgl commands from earlier draw calls in the same frame)
+    struct PendingDestroy {
+        sg_view view;
+        sg_image image;
+    };
+    std::vector<PendingDestroy> pendingDestroys_;
+    uint64_t lastDestroyFlushFrame_ = 0;
 
     // -------------------------------------------------------------------------
     // Atlas management
@@ -394,10 +411,11 @@ private:
         atlas.width_ = newWidth;
         atlas.height_ = newHeight;
 
-        // Recreate GPU texture
+        // Defer GPU resource destruction (old view may still be in sgl command queue)
         if (atlas.textureValid_) {
-            sg_destroy_view(atlas.view_);
-            sg_destroy_image(atlas.texture_);
+            pendingDestroys_.push_back({atlas.view_, atlas.texture_});
+            atlas.view_ = {};
+            atlas.texture_ = {};
             atlas.textureValid_ = false;
         }
         atlas.textureDirty_ = true;
@@ -540,6 +558,20 @@ private:
         return false;
     }
 
+    // Destroy old GPU resources that are safe to release (previous frame's sgl
+    // commands have already been consumed by _sgl_draw)
+    void flushPendingDestroys() {
+        uint64_t currentFrame = sapp_frame_count();
+        if (lastDestroyFlushFrame_ == currentFrame) return;
+        lastDestroyFlushFrame_ = currentFrame;
+
+        for (auto& pd : pendingDestroys_) {
+            sg_destroy_view(pd.view);
+            sg_destroy_image(pd.image);
+        }
+        pendingDestroys_.clear();
+    }
+
     void updateAtlasTexture(AtlasState& atlas) {
         // Skip if already updated this frame
         uint64_t currentFrame = sapp_frame_count();
@@ -547,10 +579,11 @@ private:
             return;
         }
 
-        // Destroy existing resources
+        // Defer destruction of existing resources
         if (atlas.textureValid_) {
-            sg_destroy_view(atlas.view_);
-            sg_destroy_image(atlas.texture_);
+            pendingDestroys_.push_back({atlas.view_, atlas.texture_});
+            atlas.view_ = {};
+            atlas.texture_ = {};
             atlas.textureValid_ = false;
         }
 
@@ -670,8 +703,14 @@ public:
     // Load font
     // -------------------------------------------------------------------------
     bool load(const std::string& path, int size) {
+        // Render glyphs at physical pixel size for sharp text on HiDPI displays.
+        // All metrics/drawing are scaled back to logical coordinates.
+        dpiScale_ = sapp_dpi_scale();
+        int physicalSize = (int)(size * dpiScale_ + 0.5f);
+        logicalSize_ = size;
+
         cacheKey_.fontPath = path;
-        cacheKey_.fontSize = size;
+        cacheKey_.fontSize = physicalSize;
 
         // Create sampler and pipeline if not yet
         if (!resourcesInitialized_) {
@@ -682,7 +721,7 @@ public:
         if (isUrl(path)) {
 #ifdef __EMSCRIPTEN__
             // Async load - returns immediately, font available after fetch completes
-            loadFromUrlAsync(path, size);
+            loadFromUrlAsync(path, physicalSize);
             return true;  // Will be loaded asynchronously
 #else
             logError() << "Font: URL loading only supported in WebAssembly";
@@ -825,6 +864,10 @@ protected:
         // Update textures
         atlasManager_->ensureTexturesUpdated();
 
+        // DPI scale factor: atlas is rendered at physical pixels,
+        // but drawing uses logical coordinates
+        const float s = 1.0f / dpiScale_;
+
         // Pre-compute per-line widths for horizontal alignment
         std::vector<float> lineWidths;
         {
@@ -835,10 +878,10 @@ protected:
                     lineWidths.push_back(w);
                     w = 0;
                 } else if (cp == '\t') {
-                    w += atlasManager_->getSpaceAdvance() * 4;
+                    w += atlasManager_->getSpaceAdvance() * s * 4;
                 } else {
                     const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
-                    if (g && g->isValid()) w += g->getAdvance();
+                    if (g && g->isValid()) w += g->getAdvance() * s;
                 }
             }
             lineWidths.push_back(w);
@@ -857,7 +900,7 @@ protected:
         // Vertical offset (multi-line aware)
         float offsetY = 0;
         float totalTextH = getLineHeight() * lineWidths.size();
-        float ascent = atlasManager_->getAscent();
+        float ascent = atlasManager_->getAscent() * s;
 
         switch (v) {
             case Direction::Top:      offsetY = 0; break;
@@ -903,27 +946,29 @@ protected:
                     continue;
                 }
                 if (codepoint == '\t') {
-                    cursorX += atlasManager_->getSpaceAdvance() * 4;
+                    cursorX += atlasManager_->getSpaceAdvance() * s * 4;
                     continue;
                 }
 
                 const GlyphInfo* g = atlasManager_->getOrLoadGlyph(codepoint);
                 if (!g || !g->isValid() || g->getAtlasIndex() != atlasIdx) {
-                    if (g) cursorX += g->getAdvance();
+                    if (g) cursorX += g->getAdvance() * s;
                     continue;
                 }
 
                 if (g->getWidth() > 0 && g->getHeight() > 0) {
-                    float gx = cursorX + g->getXoff();
-                    float gy = cursorY + g->getYoff();
+                    float gx = cursorX + g->getXoff() * s;
+                    float gy = cursorY + g->getYoff() * s;
+                    float gw = g->getWidth() * s;
+                    float gh = g->getHeight() * s;
 
                     sgl_v2f_t2f(gx, gy, g->getU0(), g->getV0());
-                    sgl_v2f_t2f(gx + g->getWidth(), gy, g->getU1(), g->getV0());
-                    sgl_v2f_t2f(gx + g->getWidth(), gy + g->getHeight(), g->getU1(), g->getV1());
-                    sgl_v2f_t2f(gx, gy + g->getHeight(), g->getU0(), g->getV1());
+                    sgl_v2f_t2f(gx + gw, gy, g->getU1(), g->getV0());
+                    sgl_v2f_t2f(gx + gw, gy + gh, g->getU1(), g->getV1());
+                    sgl_v2f_t2f(gx, gy + gh, g->getU0(), g->getV1());
                 }
 
-                cursorX += g->getAdvance();
+                cursorX += g->getAdvance() * s;
             }
 
             sgl_end();
@@ -941,6 +986,7 @@ public:
 
         float width = 0;
         float maxWidth = 0;
+        const float s = 1.0f / dpiScale_;
 
         for (size_t i = 0; i < text.size(); ) {
             uint32_t codepoint = decodeUTF8(text, i);
@@ -951,13 +997,13 @@ public:
                 continue;
             }
             if (codepoint == '\t') {
-                width += atlasManager_->getSpaceAdvance() * 4;
+                width += atlasManager_->getSpaceAdvance() * s * 4;
                 continue;
             }
 
             const GlyphInfo* g = atlasManager_->getOrLoadGlyph(codepoint);
             if (g && g->isValid()) {
-                width += g->getAdvance();
+                width += g->getAdvance() * s;
             }
         }
 
@@ -984,24 +1030,24 @@ public:
 
     virtual float getLineHeight() const {
         if (lineHeight_ > 0) return lineHeight_;
-        return atlasManager_ ? atlasManager_->getLineHeight() : 0;
+        return atlasManager_ ? atlasManager_->getLineHeight() / dpiScale_ : 0;
     }
 
     // Get font's default line height (unaffected by setLineHeight)
     float getDefaultLineHeight() const {
-        return atlasManager_ ? atlasManager_->getLineHeight() : 0;
+        return atlasManager_ ? atlasManager_->getLineHeight() / dpiScale_ : 0;
     }
 
     virtual float getAscent() const {
-        return atlasManager_ ? atlasManager_->getAscent() : 0;
+        return atlasManager_ ? atlasManager_->getAscent() / dpiScale_ : 0;
     }
 
     virtual float getDescent() const {
-        return atlasManager_ ? atlasManager_->getDescent() : 0;
+        return atlasManager_ ? atlasManager_->getDescent() / dpiScale_ : 0;
     }
 
     int getSize() const {
-        return atlasManager_ ? atlasManager_->getFontSize() : 0;
+        return logicalSize_;
     }
 
 protected:
@@ -1061,6 +1107,8 @@ public:
 private:
     std::shared_ptr<FontAtlasManager> atlasManager_;
     FontCacheKey cacheKey_;
+    float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
+    int logicalSize_ = 0;      // User-requested font size (logical pixels)
 
     // Shared GPU resources
     static inline sg_sampler sampler_ = {};

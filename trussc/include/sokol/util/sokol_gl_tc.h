@@ -3014,8 +3014,15 @@ typedef struct {
    allocated only once per distinct sample count. Auto-grow on overflow
    (realloc to 2x, amortized O(1)) means no rendering is lost — buffers
    stay at peak size and are reused via sgl_tc_context_reset(). */
-#define _SGL_DEFAULT_MAX_VERTICES (128)
-#define _SGL_DEFAULT_MAX_COMMANDS (64)
+#ifdef SOKOL_METAL
+    #define _SGL_DEFAULT_MAX_VERTICES (128)
+    #define _SGL_DEFAULT_MAX_COMMANDS (64)
+#else
+    /* Non-Metal: start with larger buffers to minimize grow frequency,
+       since mid-frame grow requires deferral (1-frame rendering skip) */
+    #define _SGL_DEFAULT_MAX_VERTICES (1024 * 64)
+    #define _SGL_DEFAULT_MAX_COMMANDS (1024 * 16)
+#endif
 #define _SGL_SLOT_SHIFT (16)
 #define _SGL_MAX_POOL_SIZE (1<<_SGL_SLOT_SHIFT)
 #define _SGL_SLOT_MASK (_SGL_MAX_POOL_SIZE-1)
@@ -3063,6 +3070,7 @@ typedef struct {
 
     /* sokol-gfx resources */
     sg_buffer vbuf;
+    int pending_grow_vertices;  /* [TrussC fork] deferred grow: if >0, grow buffer at start of next _sgl_draw */
     sgl_pipeline def_pip;
     sg_bindings bind;
 
@@ -4165,6 +4173,12 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
        Vertex data is always uploaded in full for correct base_vertex indexing. */
     const int cmd_start = ctx->draw_base_cmd;
     if ((ctx->vertices.next > 0) && (ctx->commands.next > cmd_start)) {
+        /* [TrussC fork] If a deferred grow was requested last frame, do it now
+           (safe because we're at the start of a new frame's draw) */
+        if (ctx->pending_grow_vertices > 0) {
+            _sgl_grow_gpu_buffer(ctx, ctx->pending_grow_vertices);
+            ctx->pending_grow_vertices = 0;
+        }
         /* [TrussC fork] If GPU buffer was released, recreate it */
         if (SG_INVALID_ID == ctx->vbuf.id) {
             sg_buffer_desc vbuf_desc;
@@ -4189,20 +4203,48 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
         /* [TrussC fork] append ALL vertex data (commands reference absolute base_vertex) */
         const size_t data_size = (size_t)ctx->vertices.next * sizeof(_sgl_vertex_t);
         const sg_range range = { ctx->vertices.ptr, data_size };
+
+        /* [TrussC fork] pre-check buffer capacity before append to avoid validation panic */
+        if (data_size > 0 && sg_query_buffer_state(ctx->vbuf) == SG_RESOURCESTATE_VALID) {
+            sg_buffer_desc buf_desc = sg_query_buffer_desc(ctx->vbuf);
+            int append_pos = sg_query_buffer_info(ctx->vbuf).append_pos;
+            if ((int)buf_desc.size < append_pos + (int)data_size) {
+                int needed = ((int)buf_desc.size + (int)data_size) / (int)sizeof(_sgl_vertex_t) + 1;
+#ifdef SOKOL_METAL
+                /* Metal: safe to grow immediately (ARC retains GPU resources) */
+                if (!_sgl_grow_gpu_buffer(ctx, needed)) {
+                    sg_pop_debug_group();
+                    return;
+                }
+#else
+                /* D3D11/Vulkan/WebGPU: defer grow to next frame to avoid
+                   driver crash from destroying in-flight buffer */
+                ctx->pending_grow_vertices = needed;
+                sg_pop_debug_group();
+                return;
+#endif
+            }
+        }
+
         int base_offset = sg_append_buffer(ctx->vbuf, &range);
         if (sg_query_buffer_overflow(ctx->vbuf)) {
-            /* GPU buffer too small — grow and retry */
+            /* GPU buffer too small — grow and retry (Metal) or defer (others) */
             int needed = (int)(sg_query_buffer_desc(ctx->vbuf).size / sizeof(_sgl_vertex_t)) + ctx->vertices.next;
+#ifdef SOKOL_METAL
             if (!_sgl_grow_gpu_buffer(ctx, needed)) {
                 sg_pop_debug_group();
                 return;
             }
             base_offset = sg_append_buffer(ctx->vbuf, &range);
             if (sg_query_buffer_overflow(ctx->vbuf)) {
-                /* still overflowing after grow — give up this frame */
                 sg_pop_debug_group();
                 return;
             }
+#else
+            ctx->pending_grow_vertices = needed;
+            sg_pop_debug_group();
+            return;
+#endif
         }
         /* convert byte offset to vertex offset */
         const int vtx_offset = base_offset / (int)sizeof(_sgl_vertex_t);

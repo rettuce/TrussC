@@ -64,18 +64,14 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
         return false;
     }
 
-    // Copy pixels (BGRA -> RGBA conversion for RGBA8)
+    // Copy pixels row-by-row (handle RowPitch != width*4 stride)
+    // sokol maps SG_PIXELFORMAT_RGBA8 to DXGI_FORMAT_R8G8B8A8_UNORM,
+    // so the data is already in RGBA order — no channel swizzle needed.
     unsigned char* src = (unsigned char*)mapped.pData;
     unsigned char* dst = pixels;
+    size_t rowBytes = (size_t)width_ * 4;
     for (int y = 0; y < height_; y++) {
-        unsigned char* srcRow = src + y * mapped.RowPitch;
-        unsigned char* dstRow = dst + y * width_ * 4;
-        for (int x = 0; x < width_; x++) {
-            dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B
-            dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G <- G
-            dstRow[x * 4 + 2] = srcRow[x * 4 + 0];  // B <- R
-            dstRow[x * 4 + 3] = srcRow[x * 4 + 3];  // A <- A
-        }
+        memcpy(dst + y * rowBytes, src + y * mapped.RowPitch, rowBytes);
     }
 
     context->Unmap(stagingTexture, 0);
