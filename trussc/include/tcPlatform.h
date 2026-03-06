@@ -30,6 +30,26 @@ std::string getExecutablePath();
 std::string getExecutableDir();
 
 // ---------------------------------------------------------------------------
+// Window positioning & style
+// ---------------------------------------------------------------------------
+
+// Set window position (screen coordinates, origin = top-left of primary display)
+void setWindowPosition(int x, int y);
+
+// Set borderless window (removes title bar and standard window chrome)
+void setWindowBorderless(bool borderless);
+
+// Set window frame atomically (position + size in one call, top-left origin)
+// hideMenuBar: auto-hide menu bar and dock when true
+void setWindowFrame(int x, int y, int width, int height, bool hideMenuBar = false);
+
+// Get combined bounds of all screens (origin = top-left of primary display)
+struct ScreenBounds {
+    int x, y, width, height;
+};
+ScreenBounds getAllScreensBounds();
+
+// ---------------------------------------------------------------------------
 // Screenshot functionality
 // ---------------------------------------------------------------------------
 

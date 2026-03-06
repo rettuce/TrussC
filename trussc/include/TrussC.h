@@ -1449,6 +1449,26 @@ inline void setWindowSize(int width, int height) {
     }
 }
 
+// Set window position (screen coordinates, top-left origin)
+inline void setWindowPosition(int x, int y) {
+    platform::setWindowPosition(x, y);
+}
+
+// Set borderless window style
+inline void setWindowBorderless(bool borderless) {
+    platform::setWindowBorderless(borderless);
+}
+
+// Set window frame atomically (position + size, top-left origin)
+inline void setWindowFrame(int x, int y, int width, int height, bool hideMenuBar = false) {
+    platform::setWindowFrame(x, y, width, height, hideMenuBar);
+}
+
+// Get combined bounds of all screens
+inline platform::ScreenBounds getAllScreensBounds() {
+    return platform::getAllScreensBounds();
+}
+
 // Toggle fullscreen
 inline void setFullscreen(bool full) {
     if (full != sapp_is_fullscreen()) {
@@ -1830,6 +1850,9 @@ struct WindowSettings {
     bool pixelPerfect = false;  // true: coords = framebuffer size, false: coords = logical size
     int sampleCount = 4;  // MSAA (default 4x, 8x not supported on some devices)
     bool fullscreen = false;
+    bool borderless = false;  // Remove title bar (for multi-display spanning)
+    int windowX = -1;  // Window position X (-1 = system default)
+    int windowY = -1;  // Window position Y (-1 = system default)
     int clipboardSize = 65536;  // Clipboard buffer size (default 64KB)
     // bool headless = false;  // For future use
 
@@ -1871,6 +1894,17 @@ struct WindowSettings {
         clipboardSize = size;
         return *this;
     }
+
+    WindowSettings& setBorderless(bool enabled) {
+        borderless = enabled;
+        return *this;
+    }
+
+    WindowSettings& setPosition(int x, int y) {
+        windowX = x;
+        windowY = y;
+        return *this;
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -1896,6 +1930,11 @@ namespace internal {
     inline void (*appMouseScrolledFunc)(float, float) = nullptr;
     inline void (*appWindowResizedFunc)(int, int) = nullptr;
     inline void (*appFilesDroppedFunc)(const std::vector<std::string>&) = nullptr;
+
+    // Stored window settings for post-init configuration
+    inline bool pendingBorderless = false;
+    inline int pendingWindowX = -1;
+    inline int pendingWindowY = -1;
 } // namespace internal
 
 namespace mcp {
@@ -1944,6 +1983,16 @@ namespace internal {
         #endif
 
         if (appSetupFunc) appSetupFunc();
+
+        // Apply post-init window settings (borderless, position)
+        #ifdef __APPLE__
+        if (pendingBorderless) {
+            platform::setWindowBorderless(true);
+        }
+        if (pendingWindowX >= 0 && pendingWindowY >= 0) {
+            platform::setWindowPosition(pendingWindowX, pendingWindowY);
+        }
+        #endif
 
         // Set initial app size (must be after appSetupFunc creates the app)
         if (appWindowResizedFunc) {
@@ -2308,6 +2357,11 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     internal::appFilesDroppedFunc = [](const std::vector<std::string>& files) {
         if (app) app->filesDropped(files);
     };
+
+    // Store window settings for post-init application
+    internal::pendingBorderless = settings.borderless;
+    internal::pendingWindowX = settings.windowX;
+    internal::pendingWindowY = settings.windowY;
 
     // Build sapp_desc
     sapp_desc desc = {};

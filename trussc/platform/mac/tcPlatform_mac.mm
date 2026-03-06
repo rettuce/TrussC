@@ -77,6 +77,100 @@ std::string getExecutableDir() {
 }
 
 // ---------------------------------------------------------------------------
+// ウィンドウ位置・スタイル
+// ---------------------------------------------------------------------------
+
+void setWindowPosition(int x, int y) {
+    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
+    if (!window) return;
+
+    // Convert from top-left origin (user coords) to bottom-left origin (Cocoa)
+    NSScreen* primaryScreen = [NSScreen screens].firstObject;
+    if (!primaryScreen) return;
+    CGFloat screenHeight = primaryScreen.frame.size.height;
+    NSPoint origin = NSMakePoint((CGFloat)x, screenHeight - (CGFloat)y - window.frame.size.height);
+    [window setFrameOrigin:origin];
+}
+
+static void _restoreWindowFocus(NSWindow* window) {
+    [window makeKeyAndOrderFront:nil];
+    if (window.contentView) {
+        [window makeFirstResponder:window.contentView];
+    }
+}
+
+void setWindowBorderless(bool borderless) {
+    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
+    if (!window) return;
+
+    if (borderless) {
+        NSUInteger mask = NSWindowStyleMaskBorderless;
+        [window setStyleMask:mask];
+        [window setMovableByWindowBackground:YES];
+        [window setLevel:NSNormalWindowLevel];
+    } else {
+        NSUInteger mask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                          NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+        [window setStyleMask:mask];
+    }
+    _restoreWindowFocus(window);
+}
+
+void setWindowFrame(int x, int y, int width, int height, bool hideMenuBar) {
+    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
+    if (!window) return;
+
+    NSScreen* primaryScreen = [NSScreen screens].firstObject;
+    if (!primaryScreen) return;
+    CGFloat screenHeight = primaryScreen.frame.size.height;
+
+    // Convert top-left origin to Cocoa bottom-left origin
+    NSRect rect = NSMakeRect((CGFloat)x,
+                             screenHeight - (CGFloat)y - (CGFloat)height,
+                             (CGFloat)width,
+                             (CGFloat)height);
+    [window setFrame:rect display:YES animate:NO];
+    _restoreWindowFocus(window);
+
+    if (hideMenuBar) {
+        [[NSApplication sharedApplication] setPresentationOptions:
+            NSApplicationPresentationAutoHideMenuBar |
+            NSApplicationPresentationAutoHideDock];
+    } else {
+        [[NSApplication sharedApplication] setPresentationOptions:
+            NSApplicationPresentationDefault];
+    }
+}
+
+ScreenBounds getAllScreensBounds() {
+    NSArray<NSScreen*>* screens = [NSScreen screens];
+    if (screens.count == 0) return {0, 0, 0, 0};
+
+    NSScreen* primaryScreen = screens.firstObject;
+    CGFloat primaryHeight = primaryScreen.frame.size.height;
+
+    CGFloat minX = CGFLOAT_MAX, minY = CGFLOAT_MAX;
+    CGFloat maxX = -CGFLOAT_MAX, maxY = -CGFLOAT_MAX;
+
+    for (NSScreen* screen in screens) {
+        NSRect frame = screen.frame;
+        // Convert Cocoa bottom-left origin to top-left origin
+        CGFloat topY = primaryHeight - (frame.origin.y + frame.size.height);
+        CGFloat bottomY = topY + frame.size.height;
+
+        if (frame.origin.x < minX) minX = frame.origin.x;
+        if (topY < minY) minY = topY;
+        if (frame.origin.x + frame.size.width > maxX) maxX = frame.origin.x + frame.size.width;
+        if (bottomY > maxY) maxY = bottomY;
+    }
+
+    return {
+        (int)minX, (int)minY,
+        (int)(maxX - minX), (int)(maxY - minY)
+    };
+}
+
+// ---------------------------------------------------------------------------
 // スクリーンショット機能（Metal API を使用）
 // ---------------------------------------------------------------------------
 
