@@ -108,6 +108,12 @@ addons/*
 !addons/tcxTls
 !addons/tcxWebSocket
 
+# IE3 custom addons (fork)
+!addons/tcxContext
+!addons/tcxShaderLive
+!addons/tcxSceneManager
+!addons/tcxOscBind
+
 # =============================================================================
 # Project Generator
 # =============================================================================
